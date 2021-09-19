@@ -570,3 +570,257 @@ npm start
 我自己則是建議你能夠設計一個計數器帳號和使用者帳號的關聯，
 可以使用[findProgramAddress](https://solana-labs.github.io/solana-web3.js/classes/PublicKey.html#findProgramAddress)，這可以傳seed並且計算PDA，有興趣的朋友可以往這方面研究一下。
 
+## Hello World part 2
+
+再來我們會建一個能夠儲存訊息的program, 這邊你可以用原本的專案繼續改，也可以創一個新的。
+
+```rust
+use anchor_lang::prelude::*;
+
+declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+
+#[program]
+pub mod helloworld2 {
+    use super::*;
+    // init的操作
+    pub fn initialize(ctx: Context<Initialize>, data: String) -> ProgramResult {
+        let base_account = &mut ctx.accounts.base_account;
+        let copy = data.clone();
+        base_account.data = data;
+        base_account.data_list.push(copy);
+        Ok(())
+    }
+    // 更新資料
+    pub fn update(ctx: Context<Update>, data: String) -> ProgramResult {
+        let base_account = &mut ctx.accounts.base_account;
+        let copy = data.clone();
+        base_account.data = data;
+        base_account.data_list.push(copy);
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct Initialize<'info> {
+    #[account(init, payer = user, space = 64 + 64)]
+    pub base_account: Account<'info, BaseAccount>,
+    pub user: AccountInfo<'info>,
+    pub system_program: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct Update<'info> {
+    #[account(mut)]
+    pub base_account: Account<'info, BaseAccount>,
+}
+
+// 儲存訊息的結構
+#[account]
+pub struct BaseAccount {
+    // 當前資料
+    pub data: String,
+    // 歷史資料
+    pub data_list: Vec<String>,
+}
+```
+
+這邊的space是64+64，這個大小是可以自訂的，完全依照自己的需求來給。不過一旦固定之後之後要換到更大的space的account會需要多寫migration。
+
+接下來是test
+
+```js
+const assert = require("assert");
+const anchor = require("@project-serum/anchor");
+const { SystemProgram } = anchor.web3;
+
+describe("Mysolanaapp", () => {
+  const provider = anchor.Provider.env();
+  anchor.setProvider(provider);
+  it("It initializes the account", async () => {
+    const program = anchor.workspace.Mysolanaapp;
+    const baseAccount = anchor.web3.Keypair.generate();
+    await program.rpc.initialize("Hello World", {
+      accounts: {
+        baseAccount: baseAccount.publicKey,
+        user: provider.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      },
+      signers: [baseAccount],
+    });
+
+    const account = await program.account.baseAccount.fetch(baseAccount.publicKey);
+    console.log('Data: ', account.data);
+    assert.ok(account.data === "Hello World");
+    _baseAccount = baseAccount;
+
+  });
+
+  it("Updates a previously created account", async () => {
+    const baseAccount = _baseAccount;
+    const program = anchor.workspace.Mysolanaapp;
+
+    await program.rpc.update("Some new data", {
+      accounts: {
+        baseAccount: baseAccount.publicKey,
+      },
+    });
+
+    const account = await program.account.baseAccount.fetch(baseAccount.publicKey);
+    console.log('Updated data: ', account.data)
+    assert.ok(account.data === "Some new data");
+    console.log('all account data:', account)
+    console.log('All data: ', account.dataList);
+    assert.ok(account.dataList.length === 2);
+  });
+});
+```
+
+```
+anchor test
+```
+
+最後是前端的code
+
+```js
+import './App.css';
+import { useState } from 'react';
+import { Connection, PublicKey } from '@solana/web3.js';
+import { Program, Provider, web3 } from '@project-serum/anchor';
+import idl from './idl.json';
+
+import { getPhantomWallet } from '@solana/wallet-adapter-wallets';
+import { useWallet, WalletProvider, ConnectionProvider } from '@solana/wallet-adapter-react';
+import { WalletModalProvider, WalletMultiButton } from '@solana/wallet-adapter-react-ui';
+
+const wallets = [ getPhantomWallet() ]
+
+const { SystemProgram, Keypair } = web3;
+const baseAccount = Keypair.generate();
+const opts = {
+  preflightCommitment: "processed"
+}
+const programID = new PublicKey(idl.metadata.address);
+
+function App() {
+  const [value, setValue] = useState('');
+  const [dataList, setDataList] = useState([]);
+  const [input, setInput] = useState('');
+  const wallet = useWallet()
+
+  async function getProvider() {
+    /* create the provider and return it to the caller */
+    /* network set to local network for now */
+    const network = "http://127.0.0.1:8899";
+    const connection = new Connection(network, opts.preflightCommitment);
+
+    const provider = new Provider(
+      connection, wallet, opts.preflightCommitment,
+    );
+    return provider;
+  }
+
+  async function initialize() {
+    const provider = await getProvider();
+    /* create the program interface combining the idl, program ID, and provider */
+    const program = new Program(idl, programID, provider);
+    try {
+      /* interact with the program via rpc */
+      await program.rpc.initialize("Hello World", {
+        accounts: {
+          baseAccount: baseAccount.publicKey,
+          user: provider.wallet.publicKey,
+          systemProgram: SystemProgram.programId,
+        },
+        signers: [baseAccount]
+      });
+
+      const account = await program.account.baseAccount.fetch(baseAccount.publicKey);
+      console.log('account: ', account);
+      setValue(account.data.toString());
+      setDataList(account.dataList);
+    } catch (err) {
+      console.log("Transaction error: ", err);
+    }
+  }
+
+  async function update() {
+    if (!input) return
+    const provider = await getProvider();
+    const program = new Program(idl, programID, provider);
+    await program.rpc.update(input, {
+      accounts: {
+        baseAccount: baseAccount.publicKey
+      }
+    });
+
+    const account = await program.account.baseAccount.fetch(baseAccount.publicKey);
+    console.log('account: ', account);
+    setValue(account.data.toString());
+    setDataList(account.dataList);
+    setInput('');
+  }
+
+  if (!wallet.connected) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop:'100px' }}>
+        <WalletMultiButton />
+      </div>
+    )
+  } else {
+    return (
+      <div className="App">
+        <div>
+          {
+            !value && (<button onClick={initialize}>Initialize</button>)
+          }
+
+          {
+            value ? (
+              <div>
+                <h2>Current value: {value}</h2>
+                <input
+                  placeholder="Add new data"
+                  onChange={e => setInput(e.target.value)}
+                  value={input}
+                />
+                <button onClick={update}>Add data</button>
+              </div>
+            ) : (
+              <h3>Please Inialize.</h3>
+            )
+          }
+          {
+            dataList.map((d, i) => <h4 key={i}>{d}</h4>)
+          }
+        </div>
+      </div>
+    );
+  }
+}
+
+const AppWithProvider = () => (
+  <ConnectionProvider endpoint="http://127.0.0.1:8899">
+    <WalletProvider wallets={wallets} autoConnect>
+      <WalletModalProvider>
+        <App />
+      </WalletModalProvider>
+    </WalletProvider>
+  </ConnectionProvider>
+)
+
+export default AppWithProvider;
+```
+
+再來記得確定你的 `solana-test-validator` 有跑起來。執行
+
+```
+anchor build
+
+anchor deploy
+```
+
+記得一樣要把idl檔案複製到app的src下面
+
+```
+npm start
+```
