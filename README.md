@@ -37,7 +37,7 @@ Anchor就像是Hardhat,Truffle這類的工具。他還在Rust的更上層提供�
 在開始前可能會需要預先安裝一些東西
 
 1. Node.js (推薦使用nvm或是fnm來安裝)
-2. Solana Tool Suite ([這裡](https://docs.solana.com/cli/install-solana-cli-tools)有安裝說明，另外如果是M1的話，可以參考[這裡](https://github.com/project-serum/anchor/issues/95#issuecomment-913090162))
+2. Solana Tool Suite([這裡](https://docs.solana.com/cli/install-solana-cli-tools)有安裝說明，另外如果是M1的話，可以參考[這裡](https://github.com/project-serum/anchor/issues/95#issuecomment-913090162))
 3. Anchor ([這裡](https://project-serum.github.io/anchor/getting-started/installation.html#install-rust)有安裝步驟)
 4. Solana browser wallet (推薦使用[Phontom](https://phantom.app/))
 
