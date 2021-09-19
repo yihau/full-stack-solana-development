@@ -225,3 +225,348 @@ anchor test
 ```
 
 沒意外的話他會噴一個警告，跟你說你的ctx沒有用，要改成_ctx，這樣這邊的基本操作就算是完成了。我們接下來要來打造我們第一個Hello World
+
+## 建置Hello World
+
+這邊拿剛剛的專案來修改，我們會做一個計數器，每次被呼叫的時候都會+1。
+
+*programs/mysolanaapp/src/lib.rs*
+```rust
+use anchor_lang::prelude::*;
+
+declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+
+#[program]
+mod mysolanaapp {
+    use super::*;
+
+    // 因為Solana account model的關係，我們需要創造一個帳戶來儲存
+    // 我們的計數結果，而不是直接把數字存在合約中
+    // 這邊我們定義一個create的操作，讓帳戶能在這個合約內被初始化
+    pub fn create(ctx: Context<Create>) -> ProgramResult {
+        let base_account = &mut ctx.accounts.base_account;
+        base_account.count = 0;
+        Ok(())
+    }
+
+    // 這個操作就是+1的地方，這邊會取client傳過來的計數用的帳戶
+    // 然後對他+1
+    pub fn increment(ctx: Context<Increment>) -> ProgramResult {
+        let base_account = &mut ctx.accounts.base_account;
+        base_account.count += 1;
+        Ok(())
+    }
+}
+
+// 這個是create操作時所需要的一些參數
+#[derive(Accounts)]
+pub struct Create<'info> {
+    #[account(init, payer = user, space = 16 + 16)]
+    pub base_account: Account<'info, BaseAccount>,
+    pub user: AccountInfo<'info>,
+    pub system_program: AccountInfo<'info>,
+}
+
+// 這個是increment所需要的參數
+#[derive(Accounts)]
+pub struct Increment<'info> {
+    #[account(mut)]
+    pub base_account: Account<'info, BaseAccount>,
+}
+
+// 儲存數量的結構體
+#[account]
+pub struct BaseAccount {
+    pub count: u64,
+}
+```
+
+在這個program內有兩個instruction，`create`和`increment`。
+
+一般我們在新建insturction時都會需要傳入一個Context的結構，主要就是定義這個instruction會用到什麼東西。
+
+`#[account(...)]` 是一個對於acccount的加強描述，他會定義這個account在這個instruction的限制，如果傳入的account不滿足這些敘述，那這個instruction就會失敗。
+
+所以以這個例子來說，我們並沒有定義誰擁有什麼帳戶，也沒有相關的驗證權限，也就是說在我們現在的program內，Alice是可以拿Bob創出的account的。
+
+完成之後記得再下一次build指令
+
+```sh
+anchor build
+```
+
+接下來我們來寫test
+
+*tests/mysolanaapp.js*
+
+```js
+const assert = require("assert");
+const anchor = require("@project-serum/anchor");
+const { SystemProgram } = anchor.web3;
+
+describe("mysolanaapp", () => {
+  /* create and set a Provider */
+  const provider = anchor.Provider.env();
+  anchor.setProvider(provider);
+
+  it("創建一個帳戶", async () => {
+    // 定義program是我們的mysolanaapp
+    const program = anchor.workspace.Mysolanaapp;
+    // 這邊用內建的隨意創一個
+    const baseAccount = anchor.web3.Keypair.generate();
+    // 這邊規則跟之前說的一樣，可以使用 program.rpc.<instruction-name-in-program> 來呼叫
+    await program.rpc.create({
+      accounts: {
+        // 這邊的輸入會跟我們在program裡面定義的context是一樣的
+        baseAccount: baseAccount.publicKey,
+        user: provider.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      },
+      // baseAccount會需要簽名是因為他要被創建
+      // 不太熟悉的人可以去我的solana-web3-demo的tour過一下概念
+      signers: [baseAccount],
+    });
+
+    // 驗證我們創出來的account可以成功被讀取資料
+    const account = await program.account.baseAccount.fetch(baseAccount.publicKey);
+    console.log('Count 0: ', account.count.toString())
+    assert.ok(account.count.toString() == 0);
+    _baseAccount = baseAccount;
+
+  });
+
+  it("增加", async () => {
+    // 這邊延續我們剛剛創出來的account
+    const baseAccount = _baseAccount;
+    // 一樣定義是我們的program
+    const program = anchor.workspace.Mysolanaapp;
+    // 這邊規則跟之前說的一樣，可以使用 program.rpc.<instruction-name-in-program> 來呼叫
+    await program.rpc.increment({
+      accounts: {
+        // 如同我們program定義的increment的context
+        baseAccount: baseAccount.publicKey,
+      },
+    });
+
+    // 驗證我們的+1有沒有成功
+    const account = await program.account.baseAccount.fetch(baseAccount.publicKey);
+    console.log('Count 1: ', account.count.toString())
+    assert.ok(account.count.toString() == 1);
+  });
+});
+```
+
+在我們執行它之前，我們會需要知道我們的program ID，我們可以透過下面的指令得到它
+
+```
+solana address -k target/deploy/mysolanaapp-keypair.json
+```
+
+並且在
+
+*mysolanaapp/src/lib.rs*
+
+```rust
+// 把原本在裡面的數值換成我們的program id
+declare_id!("your-program-id");
+```
+
+和
+
+*Anchor.toml*
+
+```toml
+[programs.localnet]
+mysolanaapp = "your-program-id"
+```
+
+上面兩步驟都完成之後，就可以來試試他了
+
+```
+anchor test
+```
+
+接下來我們來寫前端
+
+我們先回到我們的mysolanaapp的anchor專案根目錄，用
+
+```sh
+npx create-react-app app
+```
+
+來覆蓋原本他給我們的app資料夾，接下來
+
+```sh
+cd app
+
+npm install @project-serum/anchor @solana/web3.js
+```
+
+再來因為我們的前端會用到[Solana Wallet Adapter](https://github.com/solana-labs/wallet-adapter)，這個庫可以幫我們處理使用者的錢包，而且裡面還集成了很多其他大宗的錢包。他需要的套件有下面這些，我們也把他裝起來。
+
+```sh
+npm install @solana/wallet-adapter-react \
+@solana/wallet-adapter-react-ui @solana/wallet-adapter-wallets \
+@solana/wallet-adapter-base
+```
+
+裝完之後我們把IDL檔案複製過來
+
+```
+cp ../target/idl/mysolanaapp.json src/idl.json
+```
+
+接下來我們來改前端的頁面
+
+*app/src/App.js*
+
+```js
+import './App.css';
+import { useState } from 'react';
+import { Connection, PublicKey } from '@solana/web3.js';
+import {
+  Program, Provider, web3
+} from '@project-serum/anchor';
+import idl from './idl.json';
+
+import { getPhantomWallet } from '@solana/wallet-adapter-wallets';
+import { useWallet, WalletProvider, ConnectionProvider } from '@solana/wallet-adapter-react';
+import { WalletModalProvider, WalletMultiButton } from '@solana/wallet-adapter-react-ui';
+
+const wallets = [
+  /* view list of available wallets at https://github.com/solana-labs/wallet-adapter#wallets */
+  getPhantomWallet()
+]
+
+const { SystemProgram, Keypair } = web3;
+/* create an account  */
+const baseAccount = Keypair.generate();
+const opts = {
+  preflightCommitment: "processed"
+}
+const programID = new PublicKey(idl.metadata.address);
+
+function App() {
+  const [value, setValue] = useState(null);
+  const wallet = useWallet();
+
+  async function getProvider() {
+    /* create the provider and return it to the caller */
+    /* network set to local network for now */
+    const network = "http://127.0.0.1:8899";
+    const connection = new Connection(network, opts.preflightCommitment);
+
+    const provider = new Provider(
+      connection, wallet, opts.preflightCommitment,
+    );
+    return provider;
+  }
+
+  async function createCounter() {
+    const provider = await getProvider()
+    /* create the program interface combining the idl, program ID, and provider */
+    const program = new Program(idl, programID, provider);
+    try {
+      /* interact with the program via rpc */
+      await program.rpc.create({
+        accounts: {
+          baseAccount: baseAccount.publicKey,
+          user: provider.wallet.publicKey,
+          systemProgram: SystemProgram.programId,
+        },
+        signers: [baseAccount]
+      });
+
+      const account = await program.account.baseAccount.fetch(baseAccount.publicKey);
+      console.log('account: ', account);
+      setValue(account.count.toString());
+    } catch (err) {
+      console.log("Transaction error: ", err);
+    }
+  }
+
+  async function increment() {
+    const provider = await getProvider();
+    const program = new Program(idl, programID, provider);
+    await program.rpc.increment({
+      accounts: {
+        baseAccount: baseAccount.publicKey
+      }
+    });
+
+    const account = await program.account.baseAccount.fetch(baseAccount.publicKey);
+    console.log('account: ', account);
+    setValue(account.count.toString());
+  }
+
+  if (!wallet.connected) {
+    /* If the user's wallet is not connected, display connect wallet button. */
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop:'100px' }}>
+        <WalletMultiButton />
+      </div>
+    )
+  } else {
+    return (
+      <div className="App">
+        <div>
+          {
+            !value && (<button onClick={createCounter}>Create counter</button>)
+          }
+          {
+            value && <button onClick={increment}>Increment counter</button>
+          }
+
+          {
+            value && value >= Number(0) ? (
+              <h2>{value}</h2>
+            ) : (
+              <h3>Please create the counter.</h3>
+            )
+          }
+        </div>
+      </div>
+    );
+  }
+}
+
+/* wallet configuration as specified here: https://github.com/solana-labs/wallet-adapter#setup */
+const AppWithProvider = () => (
+  <ConnectionProvider endpoint="http://127.0.0.1:8899">
+    <WalletProvider wallets={wallets} autoConnect>
+      <WalletModalProvider>
+        <App />
+      </WalletModalProvider>
+    </WalletProvider>
+  </ConnectionProvider>
+)
+
+export default AppWithProvider;
+```
+
+改完之後，我們會需要記得把phantom裡面的network也改成localnet
+
+![1](https://res.cloudinary.com/practicaldev/image/fetch/s--TUVVaCuV--/c_limit%2Cf_auto%2Cfl_progressive%2Cq_auto%2Cw_880/https://dev-to-uploads.s3.amazonaws.com/uploads/articles/dw09ddfv8sf96px7clc5.png)
+![2](https://res.cloudinary.com/practicaldev/image/fetch/s--7fFmF46U--/c_limit%2Cf_auto%2Cfl_progressive%2Cq_auto%2Cw_880/https://dev-to-uploads.s3.amazonaws.com/uploads/articles/b8uxbjhqhnvnuheal50v.png)
+
+再來我們要來幫phontom的地址拿一點airdrop
+
+![address](https://res.cloudinary.com/practicaldev/image/fetch/s--A6wOufNS--/c_limit%2Cf_auto%2Cfl_progressive%2Cq_auto%2Cw_880/https://dev-to-uploads.s3.amazonaws.com/uploads/articles/746cr3yu2gprby424w1w.png)
+
+點一下這邊就會複製了，接下來回到command line，記得你的solana-test-validator要開起來!
+
+```
+solana airdrop 10 <phantom地址>
+```
+
+回到我們的前端專案(app/)執行
+
+```
+npm start
+```
+
+你會發現當你完成操作再次刷新頁面時，剛剛產生的地址就不見了。這是因為我們每次都是隨機的，所以計數器的地址和我們的帳號地址沒有關聯性。想要解決這個事情原作者有提供一個[gist](https://gist.github.com/dabit3/7cbd18b8bc4b495c4831f8674902eb42)。
+
+我自己則是建議你能夠設計一個計數器帳號和使用者帳號的關聯，
+可以使用[findProgramAddress](https://solana-labs.github.io/solana-web3.js/classes/PublicKey.html#findProgramAddress)，這可以傳seed並且計算PDA，有興趣的朋友可以往這方面研究一下。
+
