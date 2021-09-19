@@ -824,3 +824,39 @@ anchor deploy
 ```
 npm start
 ```
+
+## Deploying to devnet
+
+我們也可以把這個program部署到devnet上面
+
+1. 先把solana config連接到devnet
+
+```
+solana config set -ud
+```
+
+2. 更新你的phantom連接的網路到devnet
+
+3. 打開 **Anchor.toml**，把localnet改成devnet
+
+4. 重新build一次program並且確認一下program id是不是都有改好
+
+5. 重新下一次deploy指令，這次我們就會部署到devnet上了
+
+6. 記得要修改App.js內的連接網路
+
+```js
+// 修改前
+<ConnectionProvider endpoint="http://127.0.0.1:8899">
+
+// 修改後
+import {
+  ...,
+  clusterApiUrl
+} from '@solana/web3';
+
+const network = clusterApiUrl('devnet');
+
+<ConnectionProvider endpoint={network}>
+```
+
